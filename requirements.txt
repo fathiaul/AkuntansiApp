@@ -1,0 +1,5 @@
+WTForms<3.1 
+#library untuk form, seperti nanma produk, jumlah dll
+Flask-Admin #template website admin untuk mempermudah programming 
+sqlalchemy #untuk menyimpan data
+flask_sqlalchemy #operator, namun sqlalchemy sbg database.
