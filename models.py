@@ -1,196 +1,160 @@
+# models.py
+
+from sqlalchemy import func
+from sqlalchemy.orm import relationship
+from sqlalchemy import func, Column, Integer, String, Date, DateTime, Numeric, ForeignKey
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
-from werkzeug.security import generate_password_hash, check_password_hash
-from flask_admin.contrib.sqla import ModelView
-from sqlalchemy.orm import Session
-from wtforms.fields import HiddenField
-from flask_admin.model.form import InlineFormAdmin
 
 db = SQLAlchemy()
 
-# ========================
-# USER LOGIN
-# ========================
+
 class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(100), unique=True, nullable=False)
-    password_hash = db.Column(db.String(200), nullable=False)
+    __tablename__ = 'users'
 
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
+    id            = Column(Integer, primary_key=True)
+    username      = Column(String(100), unique=True, nullable=False)
+    password_hash = Column(String(200), nullable=False)
 
-    def check_password(self, password):
-        return check_password_hash(self.password_hash, password)
+    def set_password(self, pwd):
+        from werkzeug.security import generate_password_hash
+        self.password_hash = generate_password_hash(pwd)
 
-# ========================
-# PRODUK
-# ========================
-class Product(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
-    price = db.Column(db.Float, nullable=False)
-    stock = db.Column(db.Integer, default=0)
-    satuan = db.Column(db.String(20), nullable=True)
-
-    def __str__(self):
-        return self.name
+    def check_password(self, pwd):
+        from werkzeug.security import check_password_hash
+        return check_password_hash(self.password_hash, pwd)
 
     def __repr__(self):
-        return f"<Product {self.name}>"
+        return f"<User {self.username}>"
 
-# ========================
-# TRANSAKSI
-# ========================
+
+class Product(db.Model):
+    __tablename__ = 'products'
+
+    id     = Column(Integer, primary_key=True)
+    name   = Column(String(100), nullable=False)
+    price  = Column(Numeric(18, 2), nullable=False)    # use fixed‐point
+    stock  = Column(Integer, default=0, nullable=False)
+    satuan = Column(String(20))
+
+    def __repr__(self):
+        return f"<Product {self.name} | {self.stock} {self.satuan} @ {self.price}>"
+
+
 class Transaction(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    total = db.Column(db.Float, nullable=False, default=0)
+    __tablename__ = 'transactions'
 
-    items = db.relationship(
+    id    = Column(Integer, primary_key=True)
+    date  = Column(DateTime, nullable=False, default=datetime.utcnow,
+                   server_default=func.now())
+    total = Column(Numeric(18, 2), nullable=False, default=0)
+
+    items = relationship(
         'TransactionItem',
         back_populates='transaction',
-        cascade="all, delete-orphan"
+        cascade='all, delete-orphan'
     )
 
+    def __repr__(self):
+        return f"<Transaction {self.id} @ {self.date:%Y-%m-%d} | Total={self.total}>"
+
+
 class TransactionItem(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    transaction_id = db.Column(db.Integer, db.ForeignKey('transaction.id'), nullable=False)
-    product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
-    subtotal = db.Column(db.Float, nullable=False)
+    __tablename__ = 'transaction_items'
 
-    transaction = db.relationship('Transaction', back_populates='items')
-    product = db.relationship('Product')
+    id             = Column(Integer, primary_key=True)
+    transaction_id = Column(Integer, ForeignKey('transactions.id'), nullable=False)
+    product_id     = Column(Integer, ForeignKey('products.id'), nullable=False)
+    quantity       = Column(Integer, nullable=False)
+    subtotal       = Column(Numeric(18, 2), nullable=False)
 
-    def __str__(self):
-        return f"{self.product.name} x {self.quantity}"
+    transaction = relationship('Transaction', back_populates='items')
+    product     = relationship('Product')
 
-# ========================
-# BUKU BESAR (LEDGER)
-# ========================
+    def __repr__(self):
+        return f"<Item {self.product.name} x{self.quantity} = {self.subtotal}>"
+
+
 class Ledger(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    tanggal = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    keterangan = db.Column(db.String(255), nullable=False)
-    akun = db.Column(db.String(255), nullable=False)  # ✅ Kolom akun ditambahkan
-    debit = db.Column(db.Float, default=0)
-    kredit = db.Column(db.Float, default=0)
-    saldo = db.Column(db.Float, default=0)
+    __tablename__ = 'ledger_entries'
 
-# ========================
-# JURNAL UMUM
-# ========================
+    id           = Column(Integer, primary_key=True)
+    tanggal      = Column(DateTime, nullable=False, default=datetime.utcnow,
+                          server_default=func.now())
+    keterangan   = Column(String(255), nullable=False)
+    account_name = Column(String(100), nullable=False)
+    debit        = Column(Numeric(18, 2), default=0, nullable=False)
+    kredit       = Column(Numeric(18, 2), default=0, nullable=False)
+    saldo        = Column(Numeric(18, 2), default=0, nullable=False)
+
+    def __repr__(self):
+        return (f"<Ledger {self.tanggal:%Y-%m-%d %H:%M} | "
+                f"{self.account_name} D:{self.debit} K:{self.kredit} S:{self.saldo}>")
+
+
 class JurnalUmum(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    tanggal = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    transaksi = db.Column(db.String(255), nullable=False)
-    debit = db.Column(db.Float, default=0)
-    kredit = db.Column(db.Float, default=0)
+    __tablename__ = 'jurnal_umum'
+
+    id        = Column(Integer, primary_key=True)
+    tanggal   = Column(DateTime, nullable=False, default=datetime.utcnow,
+                       server_default=func.now())
+    transaksi = Column(String(255), nullable=False)
+    debit     = Column(Numeric(18, 2), default=0, nullable=False)
+    kredit    = Column(Numeric(18, 2), default=0, nullable=False)
 
     def __repr__(self):
-        return f"<Jurnal {self.transaksi}>"
+        return f"<Jurnal {self.transaksi} @ {self.tanggal:%Y-%m-%d}>"
 
-# ========================
-# NERACA SALDO AWAL
-# ========================
+
 class NeracaSaldoAwal(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    tanggal = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    akun = db.Column(db.String(255), nullable=False)
-    debit = db.Column(db.Float, default=0)
-    kredit = db.Column(db.Float, default=0)
+    __tablename__ = 'neraca_saldo_awal'
+
+    id           = Column(Integer, primary_key=True)
+    tanggal      = Column(Date, nullable=False, default=datetime.utcnow().date,
+                          server_default=func.current_date())
+    account_name = Column(String(100), nullable=False)
+    debit        = Column(Numeric(18, 2), default=0, nullable=False)
+    kredit       = Column(Numeric(18, 2), default=0, nullable=False)
 
     def __repr__(self):
-        return f"<NeracaSaldoAwal {self.akun}>"
+        return (f"<SaldoAwal {self.account_name} | "
+                f"D:{self.debit} K:{self.kredit} @ {self.tanggal}>")
 
-# ========================
-# NERACA SALDO BERJALAN
-# ========================
+
 class NeracaSaldo(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    akun = db.Column(db.String(255), nullable=False)
-    debit = db.Column(db.Float, default=0)
-    kredit = db.Column(db.Float, default=0)
+    __tablename__ = 'neraca_saldo'
+
+    id     = Column(Integer, primary_key=True)
+    akun   = Column(String(255), nullable=False)
+    debit  = Column(Numeric(18, 2), default=0, nullable=False)
+    kredit = Column(Numeric(18, 2), default=0, nullable=False)
 
     def __repr__(self):
-        return f"<NeracaSaldo {self.akun}>"
+        return f"<NeracaSaldo {self.akun} D:{self.debit} K:{self.kredit}>"
 
-# ========================
-# FUNGSI BANTU
-# ========================
+
+# ------------------------------------------------------------------------------
+# Utility
+# ------------------------------------------------------------------------------
+
 def get_last_saldo():
-    last_entry = Ledger.query.order_by(Ledger.id.desc()).first()
-    return last_entry.saldo if last_entry else 0
+    last = db.session.query(Ledger).order_by(Ledger.id.desc()).first()
+    return float(last.saldo) if last else 0.0
 
-# ========================
-# INLINE MODEL UNTUK TRANSACTION ITEM
-# ========================
-class TransactionItemInlineModel(InlineFormAdmin):
-    form_overrides = dict(id=HiddenField)
-    form_columns = ['id', 'product', 'quantity']
+class LedgerMerged(db.Model):
+    __tablename__  = 'ledger_merged'
+    # these columns must match exactly your VIEW definition below!
+    id            = Column(Integer, primary_key=True)
+    tanggal       = Column(Date, nullable=False)
+    account_name  = Column(String(100), nullable=False)
+    keterangan    = Column(String(255), nullable=False)
+    debit         = Column(Numeric(18,2), nullable=False)
+    kredit        = Column(Numeric(18,2), nullable=False)
+    saldo         = Column(Numeric(18,2), nullable=False)
+    sumber        = Column(String(50), nullable=False)
 
-# ========================
-# ADMIN VIEW TRANSAKSI
-# ========================
-class TransactionView(ModelView):
-    inline_models = [TransactionItemInlineModel(TransactionItem)]
-    form_columns = ['date', 'items']
-
-    def on_model_change(self, form, model, is_created):
-        total = 0
-        session: Session = db.session
-
-        with session.no_autoflush:
-            for item in model.items:
-                product = item.product
-                if not product:
-                    raise ValueError("Produk tidak ditemukan.")
-                if product.stock < item.quantity:
-                    raise ValueError(f"Stok produk '{product.name}' tidak cukup.")
-                product.stock -= item.quantity
-                item.subtotal = item.quantity * product.price
-                total += item.subtotal
-
-        model.total = total
-
-        # Catat ke Ledger
-        saldo_sebelumnya = get_last_saldo()
-        keterangan = f"Penjualan Transaksi ID: {model.id}"
-        akun = "Penjualan"  # Akun wajib untuk Ledger
-        session.add(Ledger(
-            tanggal=model.date,
-            keterangan=keterangan,
-            akun=akun,  # ✅ disertakan untuk hindari NOT NULL error
-            debit=total,
-            kredit=0,
-            saldo=saldo_sebelumnya + total
-        ))
-
-        # Catat ke Jurnal Umum
-        session.add(JurnalUmum(
-            tanggal=model.date,
-            transaksi=keterangan,
-            debit=total,
-            kredit=0
-        ))
-
-        # Catat ke Neraca Saldo Awal
-        session.add(NeracaSaldoAwal(
-            tanggal=model.date,
-            akun=akun,
-            debit=total,
-            kredit=0
-        ))
-
-        # Catat ke Neraca Saldo Berjalan
-        session.add(NeracaSaldo(
-            akun=akun,
-            debit=total,
-            kredit=0
-        ))
-
-        super().on_model_change(form, model, is_created)
-
+    def __repr__(self):
+        return f"<LedgerMerged {self.tanggal} {self.account_name} D:{self.debit} K:{self.kredit} S:{self.saldo}>"
 
 
 
